@@ -1,0 +1,449 @@
+---
+title: 'EDS 223: assignment 4'
+author: "Sam Muir (Collaborated with Melissa Widas"
+date: "2022-11-16"
+output:
+    html_document:
+      print_df: paged
+      toc: yes
+      toc_depth: 4
+      toc_float: yes
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, warning = FALSE, message = FALSE)
+#getwd()
+```
+
+## Overview
+Marine aquaculture has the potential to play an important role in the global food supply as a more sustainable protein option than land-based meat production.[^hall] [Gentry et al.](https://www.nature.com/articles/s41559-017-0257-9) mapped the potential for marine aquaculture globally based on multiple constraints, including ship traffic, dissolved oxygen, bottom depth .[^gentry]
+
+For this assignment, you are tasked with determining which Exclusive Economic Zones (EEZ) on the West Coast of the US are best suited to developing marine aquaculture for several species of oysters.\
+
+Based on previous research, we know that oysters needs the following conditions for optimal growth:\
+
+-   sea surface temperature: 11-30&deg;C\
+-   depth: 0-70 meters below sea level
+
+##### Learning objectives:
+-   combining vector/raster data\
+-   resampling raster data\
+-   masking raster data\
+-   map algebra\
+
+### Data
+#### Sea Surface Temperature
+We will use average annual sea surface temperature (SST) from the years 2008 to 2012 to characterize the average sea surface temperature within the region. The data we are working with was originally generated from [NOAA's 5km Daily Global Satellite Sea Surface Temperature Anomaly v3.1](https://coralreefwatch.noaa.gov/product/5km/index_5km_ssta.php).
+
+#### Bathymetry
+To characterize the depth of the ocean we will use the [General Bathymetric Chart of the Oceans (GEBCO)](https://www.gebco.net/data_and_products/gridded_bathymetry_data/#area).[^gebco]
+
+#### Exclusive Economic Zones
+We will be designating maritime boundaries using Exclusive Economic Zones off of the west coast of US from [Marineregions.org](https://www.marineregions.org/eez.php).
+
+## Assignment
+
+Below is an outline of the steps you should consider taking to achieve the assignment tasks. 
+
+#### Prepare data (5 points)
+To start, we need to load all necessary data and make sure it has the coordinate reference system. 
+
+-   load necessary packages and set path\ 
+    -   I recommend using the [`here` package](https://here.r-lib.org/)
+-   read in the shapefile for the West Coast EEZ (`wc_regions_clean.shp`)\
+-   read in SST rasters
+    -   `average_annual_sst_2008.tif`\
+    -   `average_annual_sst_2009.tif`\
+    -   `average_annual_sst_2010.tif`\
+    -   `average_annual_sst_2011.tif`\
+    -   `average_annual_sst_2012.tif`\
+-   combine SST rasters into a raster stack\
+-   read in bathymetry raster (`depth.tif`)\
+-   check that data are in the same coordinate reference system\
+    -   reproject any data not in the same projection\
+    
+```{r}
+library(tidyverse)
+library(here)
+library(sf)
+library(terra)
+library(ggspatial)
+library(patchwork)
+```
+
+```{r include=TRUE, warning=FALSE, messages=FALSE}
+# read in shapefiles
+wc <- read_sf(here("data", "wc_regions_clean.shp"))
+
+# read in SST rasters
+sst_2008 <- rast(here("data", "average_annual_sst_2008.tif"))
+sst_2009 <- rast(here("data", "average_annual_sst_2009.tif"))
+sst_2010 <- rast(here("data", "average_annual_sst_2010.tif"))
+sst_2011 <- rast(here("data", "average_annual_sst_2011.tif"))
+sst_2012 <- rast(here("data", "average_annual_sst_2012.tif"))
+
+# combining the sst data 
+sst <- list(sst_2008, sst_2009, sst_2010, sst_2011, sst_2012)
+sst_rast <- rast(sst)
+# plotting check
+#plot(sst_rast)
+
+# read in bathymetry raster
+depth <- rast(here("data", "depth.tif"))
+# plotting check
+#plot(depth)
+```
+
+```{r include=TRUE, warning=FALSE, messages=FALSE}
+# check crs of all data
+#st_crs(wc) # 4326
+#st_crs(sst_rast) # 9122
+#st_crs(depth) # 4326
+
+# reproject sst_rast to have same crs as the others
+sst_rast <- project(sst_rast, "EPSG:4326")
+
+# check to see that the crs matches
+# st_crs(sst_rast) == st_crs(depth)
+```
+
+#### Process data (10 points)
+Next, we need process the SST and depth data so that they can be combined. In this case the SST and depth data have slightly different resolutions, extents, and positions. We don't want to change the underlying depth data, so we will need to resample to match the SST data using the nearest neighbor approach. 
+
+-   find the mean SST from 2008-2012\
+-   convert SST data from Kelvin to Celsius\
+    -   hint: subtract by 273.15\
+-   crop depth raster to match the extent of the SST raster\
+-   note: the resolutions of the SST and depth data do not match\
+    -   resample the NPP data to match the resolution of the SST data using the nearest neighbor approach\
+-   check that the depth and SST match in resolution, extent, and coordinate reference system\
+    -   hint: can the rasters be stacked?
+    
+```{r include=TRUE}
+# mean sst from 2008-2012
+sst_mean <-  mean(sst_rast)
+
+# calculating the mean K to ºC
+sst_mean_c <- sst_mean - 273.15
+
+# cropping depth data to sst raster extent
+depth_crop <- crop(depth, sst_mean_c)
+
+# matching the resolution of both rasters
+depth_crop_res <- resample(x = depth_crop, 
+                               y = sst_mean_c, 
+                               method = "near")
+
+#checking the CRS
+st_crs(sst_mean_c) == st_crs(depth_crop_res)
+
+# stacking the two rasters of depth and sea surface temperature
+sst_depth_list <- list(sst_mean_c, depth_crop_res)
+sst_depth_rast <- rast(sst_depth_list)
+
+# plotting new raster
+# plot(sst_depth_rast)
+```
+
+#### Find suitable locations (20)
+In order to find suitable locations for marine aquaculture, we'll need to find locations that are suitable in terms of both SST and depth.
+
+-   reclassify SST and depth data into locations that are suitable for Lump sucker fish\
+    -   hint: set suitable values to `1` and unsuitable values to `NA`\
+-   find locations that satisfy both SST and depth conditions\
+    -   hint: create an overlay using the `lapp()` function multiplying cell values\
+    
+```{r include=TRUE}
+# creating a reclassification matrix valid sst locations
+sst_reclass <- matrix(c(-Inf, 11, NA, 
+                        11, 30, 1,
+                        30, Inf, NA),
+                      ncol = 3,
+                      byrow = TRUE)
+
+# using the reclassifying matrix to set non-suitable sst to NA
+sst_suitable <- classify(sst_mean_c, rcl = sst_reclass)
+
+# creating a reclassification matrix valid depth locations
+depth_reclass <- matrix(c(-Inf, -70, NA, 
+                          -70, 0, 1,
+                          0, Inf, NA),
+                        ncol = 3,
+                        byrow = TRUE)
+
+# using the reclassifying matrix to set non-suitable depth to NA
+depth_suitable <- classify(depth_crop_res, rcl = depth_reclass)
+
+# cropping sst and depth data based on the mask
+sst_oyster <- crop(sst_mean_c, sst_suitable)
+depth_oyster <- mask(depth_crop_res, depth_suitable)
+
+# reprojecting depth_suit as sst_suit due to error below
+depth_suitable <- project(depth_suitable, crs(sst_suitable))
+
+# combining the two rasters
+list_oyster <- list(depth_suitable, sst_suitable)
+sst_depth_oyster <- rast(list_oyster)
+
+# overlaying the data
+fun_oyster <- function(x, y){
+  return(x * y)
+  }
+
+sst_depth_suitable <- lapp(sst_depth_oyster,
+                               fun = fun_oyster)
+
+# check by plotting
+#plot(sst_depth_suitable)
+```
+
+#### Determine the most suitable EEZ (20 points)
+We want to determine the total suitable area within each EEZ in order to rank zones by priority. To do so, we need to find the total area of suitable locations within each EEZ.
+
+-   select suitable cells within West Coast EEZs\
+-   find area of grid cells\
+-   find the total suitable area within each EEZ\
+    -   hint: it might be helpful to rasterize the EEZ data\
+-   find the percentage of each zone that is suitable\
+    -   hint it might be helpful to join the suitable area by region onto the EEZ vector data\
+    
+```{r include=TRUE}
+#loading in the data and plotting to check it out
+wc_eez <- vect(here("data", "wc_regions_clean.shp"))
+#plot(wc_eez)
+
+wc_eez_area <- read_sf(here("data", "wc_regions_clean.shp"))
+
+#wc_eez_area$Area <- area(wc_eez_area)
+
+#print(wc_eez_vect_area$Area)
+
+wc_eez_df <- as_tibble(wc_eez_area) %>%
+  dplyr::select(rgn_key, area_km2)
+
+print(paste0(wc_eez_df[1, 1, 1],  ": ", 
+            round(wc_eez_df[1, 2, 1]), "km^2  ",
+            wc_eez_df[2, 1, 2],  ": ",
+            round(wc_eez_df[2,2,1]), "km^2  ",
+             wc_eez_df[3, 1, 2],  ": ",
+            round(wc_eez_df[3,2,1]), "km^2  ",
+            wc_eez_df[4, 1, 2],  ": ",
+            round(wc_eez_df[4,2,1]), "km^2",
+            "."))
+
+# converting to a raster
+wc_names <- names(wc_eez)
+
+wc_eez_rast <- lapply(wc_names, function(x) {
+  rasterize(wc_eez, sst_depth_suitable,
+    field = x,
+    touches = TRUE)})
+
+# merging all objects into one raster
+wc_eez_rast <- do.call("c", wc_eez_rast)
+
+# check by plotting
+#plot(wc_eez_rast)
+
+# using the suitable locations to mask the wc_eez_rast
+wc_eez_rast <- project(wc_eez_rast, 
+                       sst_depth_suitable)
+
+# finding the area of a raster cell
+cell_area <- cellSize(wc_eez_rast, unit = "km")
+
+# plotting cell size
+#plot(cell_area)
+
+
+# masking the suitable areas with the wc_eez_raster
+wc_eez_suitable <- mask(wc_eez_rast$rgn, 
+                             sst_depth_suitable)
+
+#plot(wc_eez_suitable)
+
+# extracting the areas
+area_suitable <- expanse(wc_eez_suitable, unit = "km")
+print(paste0("The total suitable area for oysters based on sea surface temperature and depth is ", round(area_suitable$area), " km^2."))
+
+# extracting area per suitable region and turning it into a dataframe
+area_region <- expanse(wc_eez_suitable, unit = "km", byValue = TRUE)
+area_region <- as_tibble(area_region)
+
+# adding a region column in the dataframe
+rgn_key <- c("CA-C", "CA-N", "OR", "CA-S", "WA")
+rgn_key <- as.data.frame(rgn_key)
+area_region <- cbind(area_region, rgn_key)
+
+# calculating the percent of each area in the suitable region by joining the two dataframes and then calculating the percent per suitable region
+area_per <- left_join(area_region, wc_eez_df, by = "rgn_key")
+area_per <- area_per %>%
+  mutate(area_percent = area/area_km2 * 100)
+
+table <- as.data.frame(cbind(area_per$value, area_per$area_km2, area_per$area_percent))
+colnames(table) <- c("Region", "Total Suitable Area", "Percent Suitable Area")
+print(table)
+```
+    
+#### Visualize results (5 points)
+Now that we have results, we need to present them!
+
+Create the following maps:
+
+-   total suitable area by region\
+-   percent suitable area by region\
+
+Include:
+
+-   legible legends\
+-   updated color aesthetics\
+-   basemap\
+
+```{r include=TRUE, fig.width = 10, fig.height=7}
+# combining area and percent area with the vector and setting it as an sf object
+map_data <- merge(wc_eez, area_per, by = "rgn_key")
+map_data_sf <- st_as_sf(map_data)
+
+# mapping the data with percent of area as the fill
+plot1 <- ggplot(data = map_data_sf, aes(fill = area_percent)) +
+  geom_sf() +
+  theme_classic() +
+  scale_fill_viridis_c(option = "G", begin = 0.2) +
+  labs(fill = "% Suitable Area", x = "", y = "") +
+  ggsflabel::geom_sf_label_repel(data = map_data_sf, aes(label = rgn), # label the region by key
+                                 seed = 9, # seed so placements are the same
+                                 size = 3, fill = "white") + # label size
+annotation_north_arrow(location = "bl", # north arrow bottom right
+                         style = ggspatial::north_arrow_fancy_orienteering())
+
+plot2 <- ggplot(data = map_data_sf, aes(fill = area_km2.y)) +
+  geom_sf() +
+  theme_classic() +
+  scale_fill_viridis_c(option = "G", begin = 0.2) +
+  labs(fill = "Total Suitable Area (km2)", x = "", y = "") +
+  ggsflabel::geom_sf_label_repel(data = map_data_sf, aes(label = rgn), # label the region by key
+                                 seed = 9, # seed so placements are the same
+                                 size = 3, fill = "white") + # label size
+  annotation_north_arrow(location = "bl", # north arrow bottom right
+                         style = ggspatial::north_arrow_fancy_orienteering()) 
+plot1 + plot2 + plot_annotation(title = paste("Total Suitable Area for Oysters")) + plot_layout(widths = 3)
+```
+
+
+#### Broaden your workflow! (40 points)
+Now that you've worked through the solution for one group of species, let's update your workflow to work for other species. Please create a function that would allow you to reproduce your results for other species. Your function should be able to do the following:\
+
+-   accept temperature and depth ranges and species name as inputs\
+-   create maps of total suitable area and percent suitable area per EEZ with the species name in the title\
+
+```{r}
+species_suitability <- function(min_temp, max_temp, min_depth, max_depth, species) {
+
+# Read in data
+eez <- vect("data/wc_regions_clean.shp")
+sst_2008 <- rast(here("data", "average_annual_sst_2008.tif"))
+sst_2009 <- rast(here("data", "average_annual_sst_2009.tif"))
+sst_2010 <- rast(here("data", "average_annual_sst_2010.tif"))
+sst_2011 <- rast(here("data", "average_annual_sst_2011.tif"))
+sst_2012 <- rast(here("data", "average_annual_sst_2012.tif"))
+# Stack the rasters
+sst <- list(sst_2008, sst_2009, sst_2010, sst_2011, sst_2012)
+sst_rast <- rast(sst)
+depth <- rast("data/depth.tif")
+
+# transform crs
+eez <- project(eez, "EPSG:4326")
+sst_rast <- project(sst_rast, "EPSG:4326")
+depth <- project(depth, "EPSG:4326")
+
+# find mean and convert to ºC
+mean_sst <- mean(sst_rast)
+mean_sst <- mean_sst - 273.15
+
+depth_crop <- crop(depth, mean_sst)
+depth_resamp <- resample(x = depth_crop, y = mean_sst, method = "near")
+#Reclassify depth raster to = 1 when between -70 and 0
+depth_reclass <- matrix(c(-Inf, -max_depth, NA,
+                      -max_depth, -min_depth, 1,
+                      -min_depth, Inf, NA), ncol = 3, byrow = TRUE)
+suitable_depth <- classify(depth_resamp, rcl = depth_reclass)
+# Reclassify sst raster
+sst_reclass <- matrix(c(-Inf, min_temp, NA,
+                    min_temp, max_temp, 1,
+                    max_temp, Inf, NA), ncol = 3, byrow = TRUE)
+suitable_sst <- classify(mean_sst, rcl = sst_reclass)
+# Find suitable locations for both depth and sst
+suitable_stack <- c(suitable_depth, suitable_sst)
+fun_suitable <- function(x, y) {x*y}
+suitable <- lapp(suitable_stack[[c(1, 2)]], fun = fun_suitable)
+# Crop the extent of suitable area
+crop_suit <- crop(suitable, eez)
+# Mask to just the eez area
+suit_masked <- mask(crop_suit, eez)
+# Find the total suitable area
+crop_suit_area <- expanse(suit_masked, unit = "km")
+# Find the cell size of each cell
+cell_area <- cellSize(suit_masked, mask = TRUE, unit = "km")
+# Rasterize eez
+eez_rast <- eez %>% 
+  rasterize(y = cell_area, field = "rgn_id")
+# Mask
+zone_mask <- terra::mask(eez_rast, cell_area)
+# Final zonal area
+zones_area <- terra::zonal(cell_area, zone_mask, fun = sum, na.rm = TRUE)
+# Join to eez
+eez_sf <- st_as_sf(eez)
+eez_total <- left_join(eez_sf, zones_area, by = "rgn_id") %>% 
+  rename("suitable_area_km2" = "area")
+# add column with percent of each region that is suitable
+eez_percent <- eez_total %>%
+  mutate("percent_suitable" = (suitable_area_km2/area_km2)*100)
+# table
+table <- as.data.frame(cbind(eez_percent$rgn, eez_percent$suitable_area_km2, eez_percent$percent_suitable))
+colnames(table) <- c("Region", "Total Suitable Area", "Percent Suitable Area")
+print(table)
+# mapping
+map_percent <- ggplot(data = eez_percent, aes(fill = percent_suitable)) +
+  geom_sf() +
+  theme_classic() +
+  scale_fill_viridis_c(option = "G", begin = 0.2) +
+  labs(fill = "% Suitable Area", 
+       x = "", y = "") +
+  ggsflabel::geom_sf_label_repel(data = eez_percent, aes(label = rgn), # label the region by key
+                                 seed = 9, # seed so placements are the same
+                                 size = 3, fill = "white") + # label size
+  annotation_north_arrow(location = "bl", # north arrow bottom right
+                         style = ggspatial::north_arrow_fancy_orienteering()) 
+
+map_total <- ggplot(data = eez_percent, aes(fill = suitable_area_km2)) +
+  geom_sf() +
+  theme_classic() +
+  scale_fill_viridis_c(option = "G", begin = 0.2) +
+  labs(fill = "Total Suitable Area (km2)",
+       x = "", y = "") +
+  ggsflabel::geom_sf_label_repel(data = eez_percent, aes(label = rgn), # label the region by key
+                                 seed = 9, # seed so placements are the same
+                                 size = 3, fill = "white") + # label size
+  annotation_north_arrow(location = "bl", # north arrow bottom right
+                         style = ggspatial::north_arrow_fancy_orienteering()) 
+
+map_percent + map_total + plot_annotation(title = paste("Suitable Area for", species)) + plot_layout(widths = 3)
+}
+```
+
+```{r fig.width = 10, fig.height=7}
+species_suitability(min_temp = 10, max_temp = 14, 
+                   min_depth =  50, max_depth = 500, 
+                   species = "Blue Squat Lobster")
+```
+
+
+Run your function for a species of your choice! You can find information on species depth and temperature requirements on [SeaLifeBase](https://www.sealifebase.ca/search.php). Remember, we are thinking about the potential for marine aquaculture, so these species should have some reasonable potential for commercial consumption. 
+
+[^hall]:Hall, S. J., Delaporte, A., Phillips, M. J., Beveridge, M. & O’Keefe, M. Blue Frontiers: Managing the Environmental Costs of Aquaculture (The WorldFish Center, Penang, Malaysia, 2011). 
+
+[^gentry]:Gentry, R. R., Froehlich, H. E., Grimm, D., Kareiva, P., Parke, M., Rust, M., Gaines, S. D., & Halpern, B. S. Mapping the global potential for marine aquaculture. *Nature Ecology & Evolution*, 1, 1317-1324 (2017).
+
+[^gebco]:GEBCO Compilation Group (2022) GEBCO_2022 Grid (doi:10.5285/e0f0bb80-ab44-2739-e053-6c86abc0289c).
+
+
