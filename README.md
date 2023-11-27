@@ -20,13 +20,13 @@ Data was obtained from:
 
 ## File Structure
 
-   aquaculture-suitability  
-    │   README.md  
-    |   .gitignore  
-    │   aquaculture-suitability.qmd      
-    │
-    └───data  
-        |   average annual sst tifs 2008-2012  
-        |   depth.tif  
-        |   exclusive economic zones shapefiles  
+      aquaculture-suitability  
+       │   README.md  
+       |   .gitignore  
+       │   aquaculture-suitability.qmd      
+       │
+       └───data  
+           |   average annual sst tifs 2008-2012  
+           |   depth.tif  
+           |   exclusive economic zones shapefiles  
         
