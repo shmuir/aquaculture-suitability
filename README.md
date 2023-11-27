@@ -20,21 +20,6 @@ Data was obtained from:
 
 ## File Structure
 
-    houston-poweroutages
-    │   README.md
-    |   .gitignore
-    │   houston-power-outages.qmd    
-    │
-    └───data
-        |   gis_osm_roads_free_1.gpkg
-        |   gis_osm_buildings_a_free_1.gpkg
-        |
-        └───VNP46A1
-        │   │   night light .tif files 
-        |
-        └───ACS_2019_5YR_TRACT_48_TEXAS.gdb
-        |   │   Texas census geometries
-
       aquaculture-suitability  
        │   README.md  
        |   .gitignore  
