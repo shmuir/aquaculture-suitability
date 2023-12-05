@@ -1,4 +1,4 @@
-# Oyster Aquaculture Suitability
+# Aquaculture Suitability on the West Coast of the U.S.
 
 An assignment for EDS223: Geospatial Analysis and Remote Sensing for the Masters of Environmental Data Science Program at UCSB. 
 
