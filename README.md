@@ -25,8 +25,12 @@ Data was obtained from:
        |   .gitignore  
        │   aquaculture-suitability.qmd      
        │
-       └───data  
-           |   average annual sst tifs 2008-2012  
-           |   depth.tif  
-           |   exclusive economic zones shapefiles  
+       └───data
+            │   wc_regions_clean.shp
+            │   depth.tif
+            │   average_annual_sst_2008.tif
+            │   average_annual_sst_2009.tif        
+            │   average_annual_sst_2010.tif        
+            │   average_annual_sst_2011.tif
+            │   average_annual_sst_2012.tif    
         
