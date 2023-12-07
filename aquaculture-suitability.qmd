@@ -57,9 +57,8 @@ library(here)
 library(sf)
 library(terra)
 library(ggspatial)
-library(patchwork)
-library(maps)
-library(mapdata)
+library(leaflet)
+library(htmltools)
 ```
 
 ```{r include=TRUE, warning=FALSE, messages=FALSE}
@@ -121,9 +120,9 @@ depth_crop_res <- resample(x = depth_crop,
                                method = "near")
 
 #checking that the CRS, resolution, and extent match
-st_crs(sst_mean_c) == st_crs(depth_crop_res)
-res(sst_mean_c) == res(depth_crop_res)
-ext(sst_mean_c) == ext(depth_crop_res)
+# st_crs(sst_mean_c) == st_crs(depth_crop_res)
+# res(sst_mean_c) == res(depth_crop_res)
+# ext(sst_mean_c) == ext(depth_crop_res)
 
 # stacking the two rasters of depth and sea surface temperature
 sst_depth_list <- list(sst_mean_c, depth_crop_res)
@@ -209,32 +208,89 @@ percentage_suitable_area %>%
     
 ## Plotting the results
 
-```{r include=TRUE, fig.width = 14, fig.height=10}
-# mapping the data with percent of area as the fill
-plot1 <- ggplot() +
-  geom_sf(data = percentage_suitable_area, aes(fill = percent_suitable_area)) +
-  geom_polygon(data = westcoast, aes(x = long, y = lat), fill = "tan") +
-  theme_classic() +
-  scale_fill_viridis_c(option = "G", begin = 0.2) +
-  labs(fill = "% Suitable Area", x = "", y = "") +
-  ggsflabel::geom_sf_label_repel(data = percentage_suitable_area, aes(label = rgn), # label the region by key
-                                 seed = 9, # seed so placements are the same
-                                 size = 3, fill = "white") + # label size
-annotation_north_arrow(location = "bl", # north arrow bottom right
-                         style = ggspatial::north_arrow_fancy_orienteering())
 
-plot2 <- ggplot() +
-  geom_sf(data = percentage_suitable_area, aes(fill = area_km2)) +
-  geom_polygon(data = westcoast, aes(x = long, y = lat), fill = "tan") +
-  theme_classic() +
-  scale_fill_viridis_c(option = "G", begin = 0.2) +
-  labs(fill = "Total Suitable Area (km2)", x = "", y = "") +
-  ggsflabel::geom_sf_label_repel(data = percentage_suitable_area, aes(label = rgn), # label the region by key
-                                 seed = 9, # seed so placements are the same
-                                 size = 3, fill = "white") + # label size
-  annotation_north_arrow(location = "bl", # north arrow bottom right
-                         style = ggspatial::north_arrow_fancy_orienteering()) 
-plot1 + plot2 + plot_annotation(title = paste("Total Suitable Area for Oysters")) + plot_layout(widths = 3)
+```{r include=TRUE}
+pal <- colorBin("Blues", domain = percentage_suitable_area$percent_suitable_area) # define color palette
+pal_total <- colorBin("Blues", domain = percentage_suitable_area$area_km2)
+# labels for the hover over text
+labels_percent <- sprintf(
+  "<strong>%s</strong><br/>%g percent",
+  percentage_suitable_area$rgn, round(percentage_suitable_area$percent_suitable_area, 2)) %>% 
+  lapply(htmltools::HTML)
+labels_total <- sprintf(
+  "<strong>%s</strong><br/>%g km<sup>2</sup>",
+  percentage_suitable_area$rgn, percentage_suitable_area$area_km2) %>% 
+  lapply(htmltools::HTML)
+
+# percent area map
+perc <- leaflet(percentage_suitable_area) %>%
+  addPolygons(
+    fillColor = ~pal(percentage_suitable_area$percent_suitable_area), # fill by the percent suitable area
+    weight = 2,
+    opacity = 1,
+    color = "grey", # border
+    dashArray = "3",
+    fillOpacity = 0.7,
+    highlightOptions = highlightOptions( # highlight region when hovered over
+    weight = 5,
+    color = "#666",
+    dashArray = "",
+    fillOpacity = 0.7,
+    bringToFront = TRUE),
+  label = labels_percent,
+  labelOptions = labelOptions( # labels when hover
+    style = list("font-weight" = "normal", padding = "3px 8px"),
+    textsize = "15px",
+    direction = "auto")) %>%
+  addLegend(pal = pal, # legend based on color palette
+            values = ~percent_suitable_area, 
+            opacity = 0.7,
+            labFormat = labelFormat(suffix = "%"), # add units
+            title = "% Suitable Area <br> for Oysters",
+            position = "bottomright") %>%
+  addTiles() # basemap
+
+# total area map
+total <- leaflet(percentage_suitable_area) %>%
+  addPolygons(
+    fillColor = ~pal_total(percentage_suitable_area$area_km2), # fill by the total suitable area
+    weight = 2,
+    opacity = 1,
+    color = "grey",
+    dashArray = "3",
+    fillOpacity = 0.7,
+   # popup = p_popup,
+    highlightOptions = highlightOptions( # highlight when hoverover
+    weight = 5,
+    color = "#666",
+    dashArray = "",
+    fillOpacity = 0.7,
+    bringToFront = TRUE),
+  label = labels_total, # hover labels
+  labelOptions = labelOptions(
+    style = list("font-weight" = "normal", padding = "3px 8px"),
+    textsize = "15px",
+    direction = "auto")) %>%
+  addLegend(pal = pal_total, # add legend with color palette
+            values = ~area_km2, 
+            opacity = 0.7,
+            labFormat = labelFormat(suffix = " km<sup>2</sup>"), # add units
+            title = "Total Suitable Area <br> for Oysters",
+            position = "bottomright") %>%
+  addTiles() # basemap
+
+# put maps side by side
+oyster_grid <- 
+  tagList(
+    tags$table(width = "100%",
+      tags$tr(
+        tags$td(perc),
+        tags$td(total)
+      )
+      )
+    )
+# show maps
+browsable(oyster_grid)
 ```
 
 ## Creating a Re-Usable Function
@@ -287,44 +343,98 @@ total_suitable_area <- zonal(mask_suitable, wc_rasterized,
                             na.rm = TRUE)
 
 #percent suitable area
-percent_suitable_area <- left_join(eez, total_suitable_area, by = 'rgn') %>%
+suitable_area <- left_join(eez, total_suitable_area, by = 'rgn') %>%
   mutate(percent_suitable_area = (area / area_km2) * 100)
 
 # table
-print(percent_suitable_area %>%
+print(suitable_area %>%
   st_drop_geometry() %>%
   select(Region = rgn,
-         `Total Suitable Area` = area_km2,
-         `Percent Suitable Area` = percent_suitable_area))
+         `Percent Suitable Area` = percent_suitable_area,
+         `Total Suitable Area` = area_km2))
 
 # mapping
-map_percent <- ggplot() +
-  geom_sf(data = percent_suitable_area, aes(fill = percent_suitable_area)) +
-  geom_polygon(data = westcoast, aes(x = long, y = lat), fill = "tan") +
-  theme_classic() +
-  scale_fill_viridis_c(option = "G", begin = 0.2) +
-  labs(fill = "% Suitable Area", 
-       x = "", y = "") +
-  ggsflabel::geom_sf_label_repel(data = percent_suitable_area, aes(label = rgn), # label the region by key
-                                 seed = 9, # seed so placements are the same
-                                 size = 3, fill = "white") + # label size
-  annotation_north_arrow(location = "bl", # north arrow bottom right
-                         style = ggspatial::north_arrow_fancy_orienteering()) 
+pal <- colorBin("Blues", domain = suitable_area$percent_suitable_area) # define color palette
+pal_total <- colorBin("Blues", domain = suitable_area$area_km2)
+# make labels for hover over
+labels_percent <- sprintf(
+  "<strong>%s</strong><br/>%g percent",
+  suitable_area$rgn, round(suitable_area$percent_suitable_area, 2)) %>% 
+  lapply(htmltools::HTML)
+labels_total <- sprintf(
+  "<strong>%s</strong><br/>%g km<sup>2</sup>",
+  suitable_area$rgn, suitable_area$area_km2) %>% 
+  lapply(htmltools::HTML)
 
-map_total <- ggplot() +
-  geom_sf(data = percent_suitable_area, aes(fill = area_km2)) +
-  geom_polygon(data = westcoast, aes(x = long, y = lat), fill = "tan") +
-  theme_classic() +
-  scale_fill_viridis_c(option = "G", begin = 0.2) +
-  labs(fill = "Total Suitable Area (km2)",
-       x = "", y = "") +
-  ggsflabel::geom_sf_label_repel(data = percent_suitable_area, aes(label = rgn), # label the region by key
-                                 seed = 9, # seed so placements are the same
-                                 size = 3, fill = "white") + # label size
-  annotation_north_arrow(location = "bl", # north arrow bottom right
-                         style = ggspatial::north_arrow_fancy_orienteering()) 
 
-map_percent + map_total + plot_annotation(title = paste("Suitable Area for", species)) + plot_layout(widths = 3)
+percent <- leaflet(suitable_area) %>%
+  addPolygons(
+    fillColor = ~pal(suitable_area$percent_suitable_area), # color region by percent
+    weight = 2,
+    opacity = 1,
+    color = "grey",
+    dashArray = "3",
+    fillOpacity = 0.7,
+   # popup = p_popup,
+    highlightOptions = highlightOptions( # when you hover over there will be pop up text
+    weight = 5,
+    color = "#666",
+    dashArray = "",
+    fillOpacity = 0.7,
+    bringToFront = TRUE),
+  label = labels_percent, # label by previously defined
+  labelOptions = labelOptions(
+    style = list("font-weight" = "normal", padding = "3px 8px"),
+    textsize = "15px",
+    direction = "auto")) %>%
+  addLegend(pal = pal, # legend based on color palette
+            values = ~suitable_area, 
+            opacity = 0.7,
+            labFormat = labelFormat(suffix = "%"), # add units
+            title = paste("% Suitable Area <br> for", species), # updates with species input
+            position = "bottomright") %>%
+  addTiles() # basemap
+
+total_area <- leaflet(suitable_area) %>%
+  addPolygons(
+    fillColor = ~pal_total(suitable_area$area_km2), # color region by area
+    weight = 2,
+    opacity = 1,
+    color = "grey",
+    dashArray = "3",
+    fillOpacity = 0.7,
+    highlightOptions = highlightOptions( # when you hover over there will be pop up text
+    weight = 5,
+    color = "#666",
+    dashArray = "",
+    fillOpacity = 0.7,
+    bringToFront = TRUE),
+  label = labels_total, # label by previously defined
+  labelOptions = labelOptions(
+    style = list("font-weight" = "normal", padding = "3px 8px"), # styling
+    textsize = "15px",
+    direction = "auto")) %>%
+  addLegend(pal = pal_total, # legend based on color palette
+            values = ~area_km2, 
+            opacity = 0.7,
+            labFormat = labelFormat(suffix = " km<sup>2</sup>"), # add units
+            title = paste("Total Suitable Area <br> for", species), # title that updates with species input
+            position = "bottomright") %>%
+  addTiles() # basemap
+
+# put the leaflet maps side by side
+aquaculture_grid <- 
+  tagList(
+    tags$table(width = "100%",
+      tags$tr(
+        tags$td(percent),
+        tags$td(total_area)
+      )
+      )
+    )
+# show the maps
+browsable(aquaculture_grid)
+
 }
 ```
 
