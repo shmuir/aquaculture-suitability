@@ -208,7 +208,6 @@ percentage_suitable_area %>%
     
 ## Plotting the results
 
-
 ```{r include=TRUE}
 pal <- colorBin("Blues", domain = percentage_suitable_area$percent_suitable_area) # define color palette
 pal_total <- colorBin("Blues", domain = percentage_suitable_area$area_km2)
@@ -248,7 +247,8 @@ perc <- leaflet(percentage_suitable_area) %>%
             labFormat = labelFormat(suffix = "%"), # add units
             title = "% Suitable Area <br> for Oysters",
             position = "bottomright") %>%
-  addTiles() # basemap
+  addTiles() %>% # basemap
+  addScaleBar()
 
 # total area map
 total <- leaflet(percentage_suitable_area) %>%
@@ -277,6 +277,7 @@ total <- leaflet(percentage_suitable_area) %>%
             labFormat = labelFormat(suffix = " km<sup>2</sup>"), # add units
             title = "Total Suitable Area <br> for Oysters",
             position = "bottomright") %>%
+  addScaleBar() %>%
   addTiles() # basemap
 
 # put maps side by side
@@ -393,6 +394,7 @@ percent <- leaflet(suitable_area) %>%
             labFormat = labelFormat(suffix = "%"), # add units
             title = paste("% Suitable Area <br> for", species), # updates with species input
             position = "bottomright") %>%
+  addScaleBar() %>%
   addTiles() # basemap
 
 total_area <- leaflet(suitable_area) %>%
@@ -420,6 +422,7 @@ total_area <- leaflet(suitable_area) %>%
             labFormat = labelFormat(suffix = " km<sup>2</sup>"), # add units
             title = paste("Total Suitable Area <br> for", species), # title that updates with species input
             position = "bottomright") %>%
+  addScaleBar() %>%
   addTiles() # basemap
 
 # put the leaflet maps side by side
